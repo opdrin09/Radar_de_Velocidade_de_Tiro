@@ -5,8 +5,8 @@ import wave
 import os
 from uncertainties import ufloat
 
-# --- FUNÇÃO DE ANÁLISE (Backend Otimizado) ---
-def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err):
+# --- FUNÇÃO DE ANÁLISE OTIMIZADA ---
+def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err, sensibilidade_impacto=0.1):
     results = {}
     
     if not filename or not os.path.exists(filename):
@@ -32,7 +32,7 @@ def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err):
         except wave.Error:
             return None, "Formato inválido. Use arquivos WAV."
 
-        # 2. Cortar (Limite 10s para garantir performance na web)
+        # 2. Cortar (Limite 10s)
         limit_sec = 10.0
         if len(signal) > limit_sec * fps:
             signal = signal[:int(limit_sec * fps)]
@@ -40,13 +40,13 @@ def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err):
         signal_full = signal
         time_full = np.linspace(0, len(signal)/fps, num=len(signal))
 
-        # 3. Achar o TIRO (Máximo Absoluto)
+        # 3. Achar o TIRO (Máximo Absoluto Global)
         abs_signal = np.abs(signal_full)
         idx_tiro = np.argmax(abs_signal)
         
-        # Validação simples de ruído
+        # Validação de ruído mínimo
         if abs_signal[idx_tiro] < 0.05:
-            return None, "Som muito baixo. Não detectei tiro claro."
+            return None, "Som muito baixo. Não detectei o disparo."
 
         t_tiro = time_full[idx_tiro]
         amp_tiro = signal_full[idx_tiro]
@@ -55,82 +55,109 @@ def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err):
         c_som = 331.4 + (0.6 * temperatura.n)
         d_val = distancia.n
         
-        dt_min = (d_val / 350.0) + (d_val / c_som)
-        dt_max = (d_val / 40.0) + (d_val / c_som)
+        # Velocidades esperadas (ajustável se necessário, mas 40-1000 cobre tudo)
+        v_min = 40.0   # Paintball/Airsoft lento
+        v_max = 1000.0 # Rifle de alta velocidade
         
-        idx_min = idx_tiro + int(dt_min * fps)
-        idx_max = idx_tiro + int(dt_max * fps)
+        # Tempo desde o tiro ATÉ o som do impacto chegar no microfone
+        # dt_mic = t_voo + t_som_retorno
+        # dt_mic = (d/v) + (d/c)
+        
+        dt_min_teorico = (d_val / v_max) + (d_val / c_som)
+        dt_max_teorico = (d_val / v_min) + (d_val / c_som)
+        
+        idx_min = idx_tiro + int(dt_min_teorico * fps)
+        idx_max = idx_tiro + int(dt_max_teorico * fps)
         
         if idx_min >= len(signal_full):
-            return None, "Áudio curto demais, acabou antes do impacto esperado."
+            return None, "Áudio curto demais ou distância muito grande."
+        
+        # Ajusta final da janela se passar do áudio
         idx_max = min(idx_max, len(signal_full))
 
-        # 5. Achar o IMPACTO (SCIPY find_peaks)
-        # Agora podemos usar SCIPY à vontade, pois rodará na nuvem!
+        # 5. Achar o IMPACTO (find_peaks na Janela)
         segmento = abs_signal[idx_min:idx_max]
         
-        # Parâmetros robustos
-        # height: Mínimo 10% da altura do tiro
-        # distance: Picos devem estar separados por pelo menos 10ms
-        picos, properties = find_peaks(segmento, height=abs_signal[idx_tiro] * 0.1, distance=int(fps * 0.01))
+        # Sensibilidade: O pico do impacto deve ser pelo menos X% do pico do tiro
+        min_height = abs_signal[idx_tiro] * sensibilidade_impacto
+        
+        # Distância mínima entre picos (evita pegar o ringing do próprio tiro)
+        min_dist = int(fps * 0.005) # 5ms
+        
+        picos, properties = find_peaks(segmento, height=min_height, distance=min_dist)
+        
+        idx_impacto = -1
+        msg_erro = None
         
         if len(picos) == 0:
-            # Fallback: máximo local se find_peaks falhar
-            idx_local = np.argmax(segmento)
+            # Nenhum pico relevante encontrado na janela física
+            # Pode ser que não houve impacto, ou foi muito baixo.
+            msg_erro = "Nenhum impacto detectado na janela esperada."
         else:
-            # Pega o pico mais alto encontrado (maior 'peak_heights')
-            idx_pico_forte = np.argmax(properties['peak_heights'])
-            idx_local = picos[idx_pico_forte]
+            # Pega o primeiro pico forte que obedece a física
+            # Geralmente o PRIMEIRO pico na janela válida é o impacto direto.
+            # O resto pode ser eco.
+            idx_local = picos[0] 
+            idx_impacto = idx_min + idx_local
+        
+        # 6. GERAR FIGURA (Mesmo se der erro, pra debug)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        # Define zoom visual
+        pad = int(0.1 * fps) # 100ms de margem
+        p_plot_start = max(0, idx_tiro - pad)
+        p_plot_end = min(len(signal_full), idx_max + pad)
+        
+        time_plot = time_full[p_plot_start:p_plot_end]
+        sig_plot = signal_full[p_plot_start:p_plot_end]
+        
+        ax.plot(time_plot, sig_plot, color='#2196F3', lw=1, label="Sinal de Áudio")
+        
+        # Marcar Tiro
+        ax.plot(t_tiro, amp_tiro, "rx", markersize=12)
+        ax.annotate("Tiro", (t_tiro, amp_tiro), xytext=(0, 10), textcoords='offset points', ha='center', color='red')
+
+        # Desenhar Janela de Busca (Área Verde Clara)
+        t_janela_inicio = time_full[idx_min]
+        t_janela_fim = time_full[idx_max-1] if idx_max > idx_min else t_janela_inicio
+        ax.axvspan(t_janela_inicio, t_janela_fim, color='green', alpha=0.1, label="Janela Física Válida")
+        
+        if idx_impacto != -1:
+            t_impacto = time_full[idx_impacto]
+            amp_impacto = signal_full[idx_impacto]
             
-        idx_impacto = idx_min + idx_local
-        
-        # Validação extra de amplitude
-        if abs_signal[idx_impacto] < (abs_signal[idx_tiro] * 0.05):
-             return None, "Impacto muito fraco detectado (ruído?)."
+            ax.plot(t_impacto, amp_impacto, "ro", markersize=8)
+            ax.annotate("Impacto", (t_impacto, amp_impacto), xytext=(0, 15), textcoords='offset points', ha='center', color='red', fontweight='bold')
+            
+            # Linha conectando os picos
+            # ax.hlines(y=amp_impacto, xmin=t_tiro, xmax=t_impacto, linestyles='dotted', colors='gray')
 
-        t_impacto = time_full[idx_impacto]
-        amp_impacto = signal_full[idx_impacto]
+            # --- CÁLCULOS FINAIS ---
+            delta_t_mic = ufloat(t_impacto - t_tiro, 1/fps)
+            c_som_u = 331.4 + (0.6 * temperatura)
+            t_voo = delta_t_mic - (distancia / c_som_u)
+            
+            if t_voo.n > 0:
+                v_bala = distancia / t_voo
+                results['v_bala'] = v_bala
+                results['delta_t'] = delta_t_mic
+                ax.set_title(f"Velocidade: {v_bala.n:.1f} +/- {v_bala.s:.1f} m/s", fontsize=14, color='green')
+            else:
+                ax.set_title("Erro: Tempo de voo negativo (Física Impossível)", color='red')
+                msg_erro = "Cálculo resultou em tempo negativo."
 
-        # 6. CÁLCULOS
-        delta_t_mic = ufloat(t_impacto - t_tiro, 1/fps)
-        c_som_u = 331.4 + (0.6 * temperatura)
-        t_voo = delta_t_mic - (distancia / c_som_u)
-        
-        if t_voo.n <= 0:
-            return None, f"Erro físico: Tempo de voo negativo ({t_voo.n*1000:.1f}ms)."
+        else:
+             ax.set_title(f"Impacto não encontrado (Aumente a sensibilidade?)", color='orange')
 
-        v_bala = distancia / t_voo
-
-        results['delta_t'] = delta_t_mic
-        results['v_bala'] = v_bala
-
-        # 7. GERAR FIGURA MATPLOTLIB (Para Streamlit)
-        # Não salvamos arquivo, retornamos o objeto Figure
-        fig, ax = plt.subplots(figsize=(10, 4))
-        
-        # Zoom inteligente
-        pad = int(0.05 * fps)
-        p_start = max(0, idx_tiro - pad)
-        p_end = min(len(signal_full), idx_impacto + pad)
-        
-        ax.plot(time_full[p_start:p_end], signal_full[p_start:p_end], color='#2196F3', lw=1, label="Audio Waveform")
-        ax.plot([t_tiro, t_impacto], [amp_tiro, amp_impacto], "rx", markersize=10, label="Events (Shot/Impact)")
-        
-        # Anotações
-        ax.annotate(f"Tiro\n{t_tiro:.3f}s", xy=(t_tiro, amp_tiro), xytext=(t_tiro, amp_tiro+0.1), 
-                    arrowprops=dict(facecolor='black', shrink=0.05), ha='center')
-        ax.annotate(f"Impacto\n{t_impacto:.3f}s", xy=(t_impacto, amp_impacto), xytext=(t_impacto, amp_impacto+0.1), 
-                    arrowprops=dict(facecolor='black', shrink=0.05), ha='center')
-
-        ax.set_title(f"Velocidade Calculada: {v_bala.n:.1f} +/- {v_bala.s:.1f} m/s")
         ax.set_xlabel("Tempo (s)")
-        ax.set_ylabel("Amplitude")
         ax.grid(True, alpha=0.3)
-        ax.legend()
+        ax.legend(loc='upper right')
         plt.tight_layout()
-
-        # Retornamos dict de resultados e a FIGURA
-        return results, fig
+        
+        if msg_erro:
+            return None, msg_erro, fig # Retorna erro E figura pra debug
+            
+        return results, None, fig # Sucesso
 
     except Exception as e:
-        return None, f"Erro Interno: {str(e)}"
+        return None, f"Erro Interno: {str(e)}", None
