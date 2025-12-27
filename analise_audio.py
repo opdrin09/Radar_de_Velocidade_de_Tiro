@@ -6,7 +6,7 @@ import os
 from uncertainties import ufloat
 
 # --- FUNÇÃO DE ANÁLISE OTIMIZADA ---
-def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err, sensibilidade_impacto=0.1):
+def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err, sensibilidade_impacto=0.1, v_min=40.0, v_max=1000.0):
     results = {}
     
     if not filename or not os.path.exists(filename):
@@ -55,9 +55,9 @@ def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err, sensibilida
         c_som = 331.4 + (0.6 * temperatura.n)
         d_val = distancia.n
         
-        # Velocidades esperadas (ajustável se necessário, mas 40-1000 cobre tudo)
-        v_min = 40.0   # Paintball/Airsoft lento
-        v_max = 1000.0 # Rifle de alta velocidade
+        # Velocidades esperadas (Agora parametrizadas)
+        # v_min e v_max vêm dos argumentos
+
         
         # Tempo desde o tiro ATÉ o som do impacto chegar no microfone
         # dt_mic = t_voo + t_som_retorno

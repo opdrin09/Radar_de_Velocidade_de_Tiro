@@ -12,8 +12,15 @@ st.title("🎯 Medidor de Velocidade")
 # Sidebar de Ajuda
 with st.sidebar:
     st.header("⚙️ Configurações")
-    sensibilidade = st.slider("Sensibilidade do Impacto (%)", min_value=1, max_value=50, value=10, step=1, help="Porcentagem da altura do pico do impacto em relação ao tiro. Se tiver muito ruído/eco, aumente este valor.")
-    st.info(f"O impacto deve ser pelo menos {sensibilidade}% da altura do tiro para ser detectado.")
+    
+    st.subheader("Filtros de Detecção")
+    sensibilidade = st.slider("Sensibilidade do Impacto (%)", min_value=1, max_value=50, value=10, step=1, help="Porcentagem da altura do pico do impacto em relação ao tiro.")
+    
+    st.subheader("Range de Velocidade (m/s)")
+    v_min_input = st.number_input("Mínima", value=40.0, step=10.0, help="Velocidade mínima esperada para o projétil.")
+    v_max_input = st.number_input("Máxima", value=1000.0, step=50.0, help="Velocidade máxima possível.")
+    
+    st.info(f"O impacto deve ser pelo menos {sensibilidade}% da altura do tiro.")
 
 # --- INPUTS ---
 col1, col2 = st.columns(2)
@@ -53,7 +60,14 @@ if buffer_final is not None:
 
     with st.spinner('Analisando física...'):
         # Passamos a sensibilidade convertida para decimal (10% -> 0.1)
-        res, msg_erro, figura = analisar_audio(tmp_filename, dist_val, dist_err, temp_val, temp_err, sensibilidade_impacto=sensibilidade/100.0)
+        res, msg_erro, figura = analisar_audio(
+            tmp_filename, 
+            dist_val, dist_err, 
+            temp_val, temp_err, 
+            sensibilidade_impacto=sensibilidade/100.0,
+            v_min=v_min_input,
+            v_max=v_max_input
+        )
 
     # Exibir Gráfico (Sempre exibir, mesmo com erro, para debug)
     if figura:
