@@ -100,8 +100,31 @@ def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err, sensibilida
             idx_local = picos[0] 
             idx_impacto = idx_min + idx_local
         
-        # 6. GERAR FIGURA (Mesmo se der erro, pra debug)
-        fig, ax = plt.subplots(figsize=(10, 5))
+        # 6. GERAR FIGURA 1: VISÃO GERAL (Para checagem visual)
+        fig_full, ax_full = plt.subplots(figsize=(10, 3))
+        ax_full.plot(time_full, signal_full, color='gray', alpha=0.6, lw=0.5, label="Áudio Completo")
+        
+        # Marcar Tiro
+        ax_full.plot(t_tiro, amp_tiro, "rx", markersize=8)
+        
+        # Marcar Janela
+        t_janela_inicio = time_full[idx_min]
+        t_janela_fim = time_full[idx_max-1] if idx_max > idx_min else t_janela_inicio
+        ax_full.axvspan(t_janela_inicio, t_janela_fim, color='green', alpha=0.1, label="Janela de Busca")
+        
+        if idx_impacto != -1:
+             t_impacto = time_full[idx_impacto]
+             amp_impacto = signal_full[idx_impacto]
+             ax_full.plot(t_impacto, amp_impacto, "ro", markersize=6)
+        
+        ax_full.set_title("Visão Geral do Áudio (Confirmar se pico é real)", fontsize=10)
+        ax_full.set_ylabel("Amp")
+        ax_full.set_xlabel("Tempo (s)")
+        ax_full.tick_params(axis='both', which='major', labelsize=8)
+        fig_full.tight_layout()
+
+        # 7. GERAR FIGURA 2: ZOOM (Para análise detalhada)
+        fig_zoom, ax = plt.subplots(figsize=(10, 5))
         
         # Define zoom visual
         pad = int(0.1 * fps) # 100ms de margem
@@ -115,23 +138,16 @@ def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err, sensibilida
         
         # Marcar Tiro
         ax.plot(t_tiro, amp_tiro, "rx", markersize=12)
-        ax.annotate("Tiro", (t_tiro, amp_tiro), xytext=(0, 10), textcoords='offset points', ha='center', color='red')
+        ax.annotate("Tiro", (t_tiro, amp_tiro), xytext=(0, 10), textcoords='offset points', ha='center', color='black')
 
         # Desenhar Janela de Busca (Área Verde Clara)
-        t_janela_inicio = time_full[idx_min]
-        t_janela_fim = time_full[idx_max-1] if idx_max > idx_min else t_janela_inicio
         ax.axvspan(t_janela_inicio, t_janela_fim, color='green', alpha=0.1, label="Janela Física Válida")
         
         if idx_impacto != -1:
-            t_impacto = time_full[idx_impacto]
-            amp_impacto = signal_full[idx_impacto]
-            
+            # Re-definido acima
             ax.plot(t_impacto, amp_impacto, "ro", markersize=8)
             ax.annotate("Impacto", (t_impacto, amp_impacto), xytext=(0, 15), textcoords='offset points', ha='center', color='red', fontweight='bold')
             
-            # Linha conectando os picos
-            # ax.hlines(y=amp_impacto, xmin=t_tiro, xmax=t_impacto, linestyles='dotted', colors='gray')
-
             # --- CÁLCULOS FINAIS ---
             delta_t_mic = ufloat(t_impacto - t_tiro, 1/fps)
             c_som_u = 331.4 + (0.6 * temperatura)
@@ -152,12 +168,13 @@ def analisar_audio(filename, dist_val, dist_err, temp_val, temp_err, sensibilida
         ax.set_xlabel("Tempo (s)")
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper right')
-        plt.tight_layout()
+        fig_zoom.tight_layout()
         
         if msg_erro:
-            return None, msg_erro, fig # Retorna erro E figura pra debug
+            # Retorna erro e AS DUAS figuras
+            return None, msg_erro, (fig_full, fig_zoom)
             
-        return results, None, fig # Sucesso
+        return results, None, (fig_full, fig_zoom) # Sucesso
 
     except Exception as e:
-        return None, f"Erro Interno: {str(e)}", None
+        return None, f"Erro Interno: {str(e)}", (None, None)

@@ -14,7 +14,9 @@ with st.sidebar:
     st.header("⚙️ Configurações")
     
     st.subheader("Filtros de Detecção")
-    sensibilidade = st.slider("Sensibilidade do Impacto (%)", min_value=1, max_value=50, value=10, step=1, help="Porcentagem da altura do pico do impacto em relação ao tiro.")
+    
+    # Sensibilidade: Agora com input numérico para precisão (0 a 100)
+    sensibilidade = st.number_input("Sensibilidade do Impacto (0-100%)", min_value=1.0, max_value=100.0, value=10.0, step=0.5, format="%.1f", help="Porcentagem da altura do pico do impacto em relação ao tiro.")
     
     st.subheader("Range de Velocidade (m/s)")
     v_min_input = st.number_input("Mínima", value=40.0, step=10.0, help="Velocidade mínima esperada para o projétil.")
@@ -53,14 +55,17 @@ elif arquivo:
 
 # --- PROCESSAMENTO ---
 if buffer_final is not None:
+    # 0. Tocar o áudio (Para o usuário validar)
+    st.audio(buffer_final)
+    
     # Salvar temporariamente
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
         tmp_file.write(buffer_final.getvalue())
         tmp_filename = tmp_file.name
 
     with st.spinner('Analisando física...'):
-        # Passamos a sensibilidade convertida para decimal (10% -> 0.1)
-        res, msg_erro, figura = analisar_audio(
+        # Passamos a sensibilidade convertida para decimal
+        res, msg_erro, figuras = analisar_audio(
             tmp_filename, 
             dist_val, dist_err, 
             temp_val, temp_err, 
@@ -68,10 +73,22 @@ if buffer_final is not None:
             v_min=v_min_input,
             v_max=v_max_input
         )
+        
+        # Desempacota figuras (se existirem)
+        if figuras and figuras[0] is not None:
+            fig_full, fig_zoom = figuras
+        else:
+            fig_full, fig_zoom = None, None
 
-    # Exibir Gráfico (Sempre exibir, mesmo com erro, para debug)
-    if figura:
-        st.pyplot(figura)
+    # 1. Gráfico Geral (Visualização da Onda Completa - Pedido do Usuário)
+    if fig_full:
+        st.subheader("1. Visão Geral (Áudio Completo)")
+        st.pyplot(fig_full)
+
+    # 2. Gráfico de Zoom (Otimizado)
+    if fig_zoom:
+        st.subheader("2. Detalhe da Captura (Zoom)")
+        st.pyplot(fig_zoom)
 
     # Exibir Resultados
     if res:
